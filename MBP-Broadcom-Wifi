@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# Ensure the script is run as root
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root (use sudo)."
+  exit 1
+fi
+
+# Function for the Main Menu
+main_menu() {
+    CHOICE=$(whiptail --title "MacBook Network Toolkit" --menu "Choose an action:" 15 60 4 \
+    "1" "Install Broadcom WiFi Drivers" \
+    "2" "Fix iPhone USB Tethering" \
+    "3" "Check Network Hardware Status" \
+    "4" "Exit" 3>&1 1>&2 2>&3)
+
+    case $CHOICE in
+        1) install_broadcom ;;
+        2) fix_tethering ;;
+        3) check_status ;;
+        4) exit 0 ;;
+    esac
+}
+
+# --- Action Functions ---
+
+install_broadcom() {
+    CHIP_ID=$(lspci -nn | grep -i network | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}(?=\])')
+    
+    case $CHIP_ID in
+        "14e4:4331") MODEL="2012 MBP (BCM4331)"; DRIVER="firmware-b43-installer" ;;
+        "14e4:43a0") MODEL="2015 MBP (BCM4360)"; DRIVER="broadcom-sta-dkms" ;;
+        *) whiptail --msgbox "Unsupported Chip: $CHIP_ID" 10 40; main_menu ;;
+    esac
+
+    if whiptail --yesno "Install $DRIVER for $MODEL?" 10 50; then
+        apt update && apt install -y "$DRIVER"
+        [ "$DRIVER" == "broadcom-sta-dkms" ] && (modprobe -r b43 bcma; modprobe wl)
+        whiptail --msgbox "Driver installed! Reboot if WiFi doesn't appear." 10 50
+    fi
+    main_menu
+}
+
+fix_tethering() {
+    {
+        echo 25; sleep 0.5
+        apt update -y > /dev/null 2>&1
+        echo 50; apt install -y libimobiledevice-utils usbmuxd > /dev/null 2>&1
+        echo 75; systemctl restart usbmuxd
+        echo 100; sleep 0.5
+    } | whiptail --gauge "Restarting USB Services..." 6 60 0
+
+    whiptail --msgbox "Services restarted. \n\n1. Unplug/Replug iPhone.\n2. Tap 'Trust' on the phone.\n3. Ensure Personal Hotspot is ON." 12 50
+    main_menu
+}
+
+check_status() {
+    WIFI_STATE=$(nmcli radio wifi)
+    USB_DEVICES=$(lsusb | grep -i "Apple" || echo "No Apple devices detected")
+    
+    whiptail --title "System Status" --msgbox "WiFi Radio: $WIFI_STATE\n\nUSB Scan:\n$USB_DEVICES" 15 60
+    main_menu
+}
+
+# Start the script
+main_menu
